@@ -17,7 +17,7 @@
 | 网页嵌入 | `web_gateway` 插件（`<iframe>` + `POST /api/chat`） | `pasm_framework/plugins/builtins/web_gateway.py` |
 | 情绪/记忆/反馈 | `BaseAgent.feel/feedback/mood/observe/recall` | `pasm_skills/sdk/base.py` |
 
-**结论**：内核与「客服壳」都已齐备。真正缺的两块——**① DB→KB 自生长连接器**（原型已完成并深化）、**② 普通人零配置的使用入口**（Studio 场景配置生成器 + Web 壳已完成；Studio 真实「导入」UI 待加）。
+**结论**：内核与「客服壳」都已齐备，两块缺口均已补齐——**① DB→KB 自生长连接器**（原型已完成并深化）、**② 普通人零配置的使用入口**（Studio 场景配置生成器 + Web 壳 + **Studio 真实「导入场景」UI** 全部完成）。
 
 ---
 
@@ -72,11 +72,14 @@ pasm-customer-service/
 - [ ] **同步异常进 `observability` 指标**（MCP 链路可观测）。
 - 验收（原型已达成）：`demo` 中 SQLite 增量 4→1→0 通过；`run --source sqlite --pasm` 真实灌库路径通。
 
-### 阶段二 · Studio 场景模板 + 普通人入口 — 配置生成器 + Web 壳已完成 ✅
-> **重要边界**：当前 PASM Studio（`desktop/pasm_companion.py`）NAV 固定 9 项、**无外部场景导入入口**；workspace 仅按 7 分类目录组织。故「一键加载」需后续在桌面端加 UI（见下"待接入"）。
-- [x] **Studio 场景配置生成器**：`studio_loader.py` 读 `agent_spec.toml` → 生成对齐 Studio persona/KB 字段的 `scenarios/<agent_id>.json`（落 `APPDATA/PASMStudio/scenarios/`），CLI `studio` 已验证。
+### 阶段二 · Studio 场景模板 + 普通人入口 — 全部完成 ✅
+> **已不再是边界**：PASM Studio ≥ 0.31.2 已在设置面板加了「📦 场景」页，
+> `pasm-cs studio` 生成的配置现在可以**真·一键加载**（见下方第 3 条）。
+- [x] **Studio 场景配置生成器**：`studio_loader.py` 读 `agent_spec.toml` → 生成对齐 Studio persona/KB 字段的 `scenarios/<agent_id>.json`。目录跟随 `PASM_STUDIO_DIR`（与 Studio 侧 `logsetup.data_dir()` **同源**），并按源写 `abs_path`，让本机导入直接命中（相对 `path` 保留供换机重定位）。
 - [x] **Web 壳（普通人浏览器直接用）**：`web_run.py` 极简 HTTP 服务（stdlib，零依赖），接真 PASM 认知（装了 pasm-framework）或离线关键词检索（未装时诚实标注）；GET / 聊天页、POST /api/chat 已端到端验证。
-- [ ] **Studio 真实「导入场景」UI**（待接入）：在 `pasm_companion.py` 加 NAV 入口或技能页按钮，读 `scenarios/*.json` 实例化 `CustomerServiceAgent`。
+- [x] **Studio 真实「导入场景」UI（2026-09-21 落地）**：Studio 侧新增 `desktop/scenario.py`（零 Qt、可 `--selftest`）+ 设置面板「📦 场景」页——列出 `scenarios/*.json`，点「导入此场景」即把人格填进「🎭 基本」页、把知识源（inline/csv/sqlite/jsonl/demo）灌进本机资料库。
+  - 跨仓端到端验证 **17 项通过**：真读 csv(6)+demo(6)+sqlite(5)=17 条，经 `knowledge.record` 合并为 9 条唯一标题；两侧目录约定一致；真实用户目录零污染。
+  - 注：**不动 NAV**（左栏 9 项是既有约定、`_switch_page` 字典为权威），入口放设置面板，属最小侵入。
 - [ ] **数据源向导**：图形选 CSV/SQL/REST → 生成 `agent_spec.toml` 的 `knowledge.sources`。
 - [ ] **一键启动网关**：模板默认开 `web_gateway`，生成 `<iframe>` 片段。
 - [ ] **人格切换器**：内置 3 套 persona（温柔/专业/活泼）下拉切换。
@@ -105,7 +108,7 @@ pasm-customer-service/
 | 平台 | 能否直接跑 PASM 智能体 | 怎么做 |
 |---|---|---|
 | **本地命令** | ✅ 是 | `python -m pasm_cs.cli run --pasm`（开发者） |
-| **PASM Studio** | 🟡 配置已生成（真实一键加载需改桌面端 NAV） | `studio` 命令生成 `scenarios/*.json`；接入 UI 见阶段二"待接入" |
+| **PASM Studio** | ✅ 是（≥ 0.31.2） | `studio` 命令生成 `scenarios/*.json` → Studio「设置 → 📦 场景」一键导入（人格进「基本」页、知识进资料库） |
 | **WorkBuddy / ClawHub** | ✅ 是（MCP 兼容，**已打通**） | 平台 LLM 经 `pasm_cs.adapters.mcp`（或通用 `pasm-mcp-server`）远程调用你的实例，**数据留在你这** |
 | **Claude Desktop / Cursor** | ✅ 是（MCP 兼容） | 同 MCP，配置 `mcpServers` 指向你的实例 |
 | **网页壳 / 挂件** | ✅ 是 | `web_run.py`（自带 HTTP 壳）或 `web_gateway` 的 `<iframe>` / REST，嵌任意网站 |
@@ -145,7 +148,9 @@ app = SimpleApplication("shop-cs", {"name": "小智", "role": "客服"},
 - **PASM 当前是单机本地架构**，做企业多用户需补多租户隔离（阶段四）。
 - **Coze/Character 无法共享 PASM 记忆/情绪**——这是平台封闭性决定的，不是技术缺陷；要保留完整认知请用 MCP 路线。
 - **连接器增量同步依赖业务表有可靠时间戳/主键**，否则只能全量+指纹去重（已支持）。
-- **Studio 真实「导入场景」入口尚未实现**（桌面端 NAV 固定 9 项）；`studio_loader` 已产出对齐格式的配置文件，接入只需在桌面端加一个读 `scenarios/*.json` 并实例化 `CustomerServiceAgent` 的 UI。
+- **Studio 场景导入只做「人格名 + 知识」两件事**（2026-09-21 更新）：角色/语气等描述性字段**不写进** Studio 配置——因为 Studio 侧没有消费它们的路径，塞进去只会留下"看着配了其实没人读"的死键（诚实优先）。本机人格以「🎭 基本」页为准。
+- **场景里的 `path` 是相对生成方仓库的**：故生成时会额外写 `abs_path`（本机绝对路径）。换机器 / 归档时按 `path` 重定位，或重新跑一次 `pasm-cs studio`。
+- **Studio 侧不依赖 `pasm-customer-service` 包**：`desktop/scenario.py` 自带标准库实现的 csv/sqlite/jsonl 读取；两个仓只通过**场景 JSON 文件**这一份契约耦合。
 
 ---
 

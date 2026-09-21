@@ -1,17 +1,14 @@
 """Studio 场景加载器：把 agent_spec.toml 转成 Studio 可识别的智能体场景配置。
 
-重要边界（诚实说明）
---------------------
-当前 PASM Studio（``desktop/pasm_companion.py``）的左栏 NAV 是固定 9 项
-（对话/任务/工作台/自动化/资料库/记忆/技能/团队/工作流），**没有「外部场景 /
-智能体导入」入口**；``pasm/cognitive/workspace.py`` 的目录也只按 7 个分类组织，
-没有「场景」目录。
+与 Studio 的对接（2026-09-21 起是**真·一键加载**，不再是"只有说明书"）
+--------------------------------------------------------------------
+PASM Studio >= 0.31.2 在设置面板加了「📦 场景」页（对应 ``desktop/scenario.py``）：
+列出本目录下的 ``*.json``，点「导入此场景」即把人格填进「🎭 基本」页、
+把知识源（inline / csv / sqlite / jsonl / demo）灌进本机资料库。
 
-因此本加载器做的是「**配置生成器**」：产出一份对齐 Studio 真实 persona 字段
-与 KB 源结构的场景配置 JSON，写入约定目录
-``%APPDATA%/PASMStudio/scenarios/<agent_id>.json``，并附带接入说明。
-真实「一键加载」需要在 Studio 加一个 UI 入口（见 ``PLAN.md`` 阶段二后半），
-但配置 schema 已与 Studio 的 persona / 知识源字段对齐，未来可直接 import。
+⚠️ **目录必须两边同源**：Studio 侧走 ``logsetup.data_dir()``（``PASM_STUDIO_DIR``
+优先），本模块的 ``studio_scenarios_dir()`` 已对齐同一优先级 —— 否则设了隔离时
+两边各写各的，表现为「生成了却一个都看不见」。
 """
 from __future__ import annotations
 
@@ -23,12 +20,64 @@ from pathlib import Path
 from .adapters.base import load_spec
 
 
+def _roaming_appdata() -> str:
+    """系统标准 Roaming 目录。
+
+    优先用系统 API 而不是先读 ``APPDATA`` 环境变量 —— 从终端（bash）启动时
+    ``APPDATA`` 可能为空，会让同一台机器上「双击」与「命令行」写到两个不同的地方
+    （用户表现为"数据不见了"）。与 Studio 侧 ``logsetup.roaming_appdata()`` 同款做法。
+    """
+    if os.name == "nt":
+        try:
+            import ctypes
+            buf = ctypes.create_unicode_buffer(260)
+            # CSIDL_APPDATA = 0x1A（即 Roaming）
+            if ctypes.windll.shell32.SHGetFolderPathW(None, 0x1A, None, 0, buf) == 0:
+                if buf.value:
+                    return buf.value
+        except Exception:                                       # noqa: BLE001
+            pass
+    return os.environ.get("APPDATA") or os.path.expanduser("~/.config")
+
+
 def studio_scenarios_dir() -> str:
-    """Studio 场景配置约定目录（与 Studio 的 APPDATA/PASMStudio 根对齐）。"""
-    base = os.environ.get("APPDATA") or os.path.expanduser("~/.config")
-    d = os.path.join(base, "PASMStudio", "scenarios")
+    """Studio 场景配置目录 —— 必须与 Studio 侧 `logsetup.data_dir()` **同源**。
+
+    ⚠️ 顺序不能改：
+      ① ``PASM_STUDIO_DIR`` 优先。那是 Studio 的隔离 / 多实例开关；不认它的话，
+         设了隔离时 `pasm-cs studio` 仍写 ``%APPDATA%``，而 Studio 去隔离目录找，
+         **一个场景都看不见**（2026-09-21 修）。
+      ② 否则 Roaming/``PASMStudio``。
+    """
+    base = os.environ.get("PASM_STUDIO_DIR")
+    if not base:
+        base = os.path.join(_roaming_appdata(), "PASMStudio")
+    d = os.path.join(base, "scenarios")
     os.makedirs(d, exist_ok=True)
     return d
+
+
+PKG_ROOT = Path(__file__).resolve().parent.parent  # pasm-customer-service/
+
+
+def _abs_asset(rel) -> str:
+    """把知识源里的相对路径解析成本机绝对路径；找不到返回空串。
+
+    为什么需要：``path`` 是**相对本仓**的（如 ``examples/products.csv``）。
+    Studio 在别的 CWD 下跑时按相对路径找不到，CSV/SQLite 源就会导入失败。
+    多存一份 ``abs_path`` 让本机导入直接命中，同时保留 ``path`` 供换机 / 归档重定位。
+    """
+    if not rel:
+        return ""
+    try:
+        if os.path.isabs(rel):
+            return rel if os.path.exists(rel) else ""
+        for c in (os.path.abspath(rel), str(PKG_ROOT / rel)):
+            if os.path.exists(c):
+                return c
+    except Exception:                                           # noqa: BLE001
+        pass
+    return ""
 
 
 def build_scenario(spec) -> dict:
@@ -36,12 +85,17 @@ def build_scenario(spec) -> dict:
     persona = spec.persona or {}
     sources = []
     for s in spec.knowledge_sources:
-        sources.append({
+        rel = getattr(s, "path", None)
+        item = {
             "type": getattr(s, "type", "unknown"),
-            "path": getattr(s, "path", None),
+            "path": rel,
             "url": getattr(s, "url", None),
             "source_name": getattr(s, "source_name", getattr(s, "type", "unknown")),
-        })
+        }
+        ab = _abs_asset(rel)
+        if ab:
+            item["abs_path"] = ab          # 本机导入优先用它，path 留给换机重定位
+        sources.append(item)
     caps = [
         {"name": c.name, "description": c.description}
         for c in (spec.capabilities or [])
@@ -69,7 +123,8 @@ def build_scenario(spec) -> dict:
             "web": bool((spec.platforms or {}).get("web")),
             "web_port": (spec.platforms or {}).get("web_port", 8080),
         },
-        "note": "由 pasm-customer-service 生成；Studio 当前需加「导入场景」入口方可一键加载。",
+        "note": "由 pasm-customer-service 生成；在 PASM Studio >= 0.31.2 的"
+                "「设置 → 📦 场景」页可一键导入（人格进「基本」页，知识进资料库）。",
         "generated_by": "pasm-customer-service studio_loader",
         "generated_at": time.strftime("%Y-%m-%dT%H:%M:%S"),
     }

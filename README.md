@@ -29,7 +29,8 @@ python -m pasm_cs.cli run --source sqlite
 # 5) 真实灌入 PASM 资料库（需 pip install pasm-framework）
 python -m pasm_cs.cli run --source sqlite --pasm
 
-# 6) 生成 Studio 场景配置（对齐 persona/KB，落 APPDATA/PASMStudio/scenarios/）
+# 6) 生成 Studio 场景配置 → 在 PASM Studio ≥0.31.2「设置 → 📦 场景」一键导入
+#    （目录跟随 PASM_STUDIO_DIR，与 Studio 数据同源；未设则落 %APPDATA%/PASMStudio/scenarios）
 python -m pasm_cs.cli studio
 
 # 7) 启动浏览器聊天壳（普通人直接对话，0 依赖；接真 PASM 需 pasm-framework）
@@ -92,7 +93,7 @@ from pasm_cs.plugin import DBKBSyncPlugin
 | 平台 | 直接跑 PASM 认知？ | 方式 |
 |---|---|---|
 | 本地 / 网页壳 | ✅ | 命令 / `web_run.py`（自带 HTTP 聊天页） |
-| PASM Studio | 🟡 配置已生成（`studio` 命令）；真实一键加载需桌面端加「导入场景」UI | `studio_loader` 产出 `scenarios/*.json` |
+| PASM Studio | ✅ **已打通并端到端验证**（≥ 0.31.2） | `studio` 命令产出 `scenarios/*.json` → Studio「设置 → 📦 场景」一键导入（人格进「基本」页、知识进资料库） |
 | WorkBuddy / ClawHub / Claude / Cursor（MCP） | ✅ **已打通并端到端验证** | `pasm_cs.adapters.mcp`（stdio MCP 服务）暴露 `cs_*` 工具；平台 LLM 调用你的实例，数据留本地 |
 | Coze / Character | ⚠️ 转译重建 | `adapters/coze.py` 导出人格+知识配置，在平台内重建（记忆/情绪不互通） |
 
