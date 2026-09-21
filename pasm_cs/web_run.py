@@ -24,7 +24,9 @@ import re
 import threading
 from pathlib import Path
 
-DEFAULT_KB = "examples/sqlite_kb.jsonl"
+#: 默认读哪个知识库 —— 与 `pasm-cs run` 的默认写入落点**同源**（见 pasm_cs/paths.py）。
+#: 两处一旦不同，"同步成功但界面说没数据"就会复发。
+from .paths import DEFAULT_KB_PATH as DEFAULT_KB  # noqa: E402
 
 INDEX_HTML = """<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
@@ -82,10 +84,13 @@ def builtin_kb() -> list:
     否则 `pip install` 之后直接跑 `pasm-cs web`，资料库是空的：任何提问都只会得到
     「[离线模式] 未接入大模型」，用户会以为坏掉了。这里让 Web 壳在"还没有任何已同步
     资料"时用内置演示知识兜底，并**明确标注**这是内置数据而非真实业务资料。
+
+    ``tags`` 一并带上（不是只取分类）—— 离线检索也按"检索面"判定，
+    同义词标签是改写式提问能被召回的前提。
     """
-    from .demo_data import DEMO_ROWS
+    from .demo_data import DEMO_ROWS, split_tags
     return [{"title": r[1], "content": r[2], "source": "builtin-demo",
-             "tags": [r[3]], "category": r[3]}
+             "tags": split_tags(r[4]), "category": r[3]}
             for r in DEMO_ROWS]
 
 
@@ -135,17 +140,44 @@ def _score(message: str, blob: str) -> int:
     return sum(1 for t in tokens if t in blob)
 
 
+#: 离线兜底的门槛：至少要有这么多个 token 与条目重合才算命中。
+#: 取 2 而非 1 —— 实测「请问 CEO 的私人邮箱是多少」会靠正文里一个「邮箱」
+#: 撞上「电子发票」（1 个 token），于是答非所问。宁可说"查不到"。
+OFFLINE_MIN_TOKENS = 2
+
+
+def _item_blob(it: dict) -> str:
+    """一条资料的可检索文本：标题 + 正文 + 标签（标签是人工维护的同义词面）。"""
+    return " ".join([
+        str(it.get("title") or ""),
+        str(it.get("content") or ""),
+        " ".join(str(t) for t in (it.get("tags") or [])),
+    ])
+
+
 def offline_reply(message: str, kb: list) -> str:
+    """无大模型时的诚实兜底：只做关键词检索，且**明确标注**自己是离线模式。
+
+    判据与真实认知的 ``cs_agent.select_knowledge`` 同构，避免"两种模式行为不一致"：
+    先看**检索面命中**（标题/标签），再退回给整体分数兜底。
+    """
+    from .cs_agent import semantic_tokens, touches_surface
+
     msg = (message or "").strip()
-    best, score = None, 0
+    qt = semantic_tokens(msg)
+
+    best, best_score, best_on_surface = None, 0, False
     for it in kb:
-        title = str(it.get("title", ""))
-        content = str(it.get("content", ""))
-        blob = title + " " + content
-        s = _score(msg, blob)
-        if s > score:
-            best, score = it, s
-    if best and score > 0:
+        s = _score(msg, _item_blob(it))
+        on_surface = bool(touches_surface(qt, it)) and s > 0
+        # 排序键：检索面命中优先，其次比分数（写成元组比较，语义直白）
+        if (best is None
+                or (on_surface, s) > (best_on_surface, best_score)):
+            best, best_score, best_on_surface = it, s, on_surface
+
+    hit = best is not None and best_score > 0 and (
+        best_on_surface or best_score >= OFFLINE_MIN_TOKENS)
+    if hit:
         return ("[离线关键词检索] %s\n%s"
                 % (best.get("title", ""), best.get("content", "")))
     return ("[离线模式] 我目前未接入本地大模型，只能检索已同步的资料库。"

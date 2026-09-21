@@ -75,25 +75,26 @@ class ConnectorError(Exception):
 # ============================================================ 数据源
 
 class DemoSource:
-    """内置演示数据源：模拟「商品/知识表」，无需任何外部依赖即可跑通链路。"""
+    """内置演示数据源：模拟「商品/知识表」，无需任何外部依赖即可跑通链路。
+
+    ★ 演示数据只有**一个来源**：``pasm_cs.demo_data``。这里不再自带一份副本。
+
+    为什么必须这样（曾经是个真缺陷）
+    --------------------------------
+    本类原先自己硬编码了 4 条演示数据，且 ``tags`` 只填了分类（如 ``["售后"]``）。
+    而检索相关性闸门（``cs_agent.select_knowledge``）要求**命中落在标题/标签上**——
+    「售后」这个词组不出「退货」这个 2-gram（中文二字词不按字面切分），于是
+    用户问「退货怎么操作」时，演示数据里的「退换货政策」**反而召不回来**：
+    「开箱即跑」的默认路径恰好是召回率最差的一条路。
+
+    把数据源收敛到 ``demo_data``（那份带同义词标签）之后，演示路径与真实
+    同步路径口径一致：问「多久能发货」能命中「配送时效」（标签里有「发货/多久」）。
+    """
 
     name = "demo"
 
     def __init__(self, rows: Optional[List[Dict[str, Any]]] = None) -> None:
-        self._rows = rows or [
-            {"id": "P001", "title": "会员等级与权益", "description":
-                "黄金会员享全年包邮、专属客服、生日礼券；白银会员享月度包邮。",
-             "category": "会员"},
-            {"id": "P002", "title": "退换货政策", "description":
-                "商品签收后 7 天内可无理由退货，需保持吊牌与包装完整，生鲜除外。",
-             "category": "售后"},
-            {"id": "P003", "title": "配送时效", "description":
-                "现货 24 小时内发货，偏远地区 3-5 天送达，支持实时物流追踪。",
-             "category": "物流"},
-            {"id": "P004", "title": "电子发票", "description":
-                "下单时可勾选电子发票，发票于发货次日发送至注册邮箱，支持增值税专票。",
-             "category": "财务"},
-        ]
+        self._rows = rows if rows is not None else _demo_rows()
 
     def fetch(self, cursor: Optional[str] = None) -> Tuple[List[KBItem], Optional[str]]:
         items: List[KBItem] = []
@@ -102,11 +103,24 @@ class DemoSource:
                 title=str(r.get("title", "")).strip(),
                 content=str(r.get("description", r.get("content", ""))).strip(),
                 source="demo",
-                tags=[str(r.get("category", "")).strip()] if r.get("category") else [],
+                tags=[str(t).strip() for t in (r.get("tags") or []) if str(t).strip()],
                 category=str(r.get("category", "kb")),
                 ref=str(r.get("id", r.get("title", ""))),
             ))
         return items, None
+
+
+def _demo_rows() -> List[Dict[str, Any]]:
+    """把 ``demo_data.DEMO_ROWS`` 转成本数据源认识的 dict 形态（唯一来源）。"""
+    from .demo_data import DEMO_ROWS, split_tags
+    out: List[Dict[str, Any]] = []
+    for r in DEMO_ROWS:
+        # 行格式：(id, title, description, category, tags_csv, updated_at)
+        out.append({
+            "id": r[0], "title": r[1], "description": r[2],
+            "category": r[3], "tags": split_tags(r[4]),
+        })
+    return out
 
 
 class CsvSource:

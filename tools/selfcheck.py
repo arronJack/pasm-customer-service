@@ -105,13 +105,26 @@ def check_spec() -> None:
 def check_web() -> None:
     section("Web 壳（普通人直接对话）")
     from pasm_cs import web_run
-    kb = [{"title": "退换货政策", "content": "签收 7 天内无理由退货，生鲜除外。"}]
+
+    # 夹具必须**带上 tags**：检索闸门要求命中落在检索面（标题/标签/分类）上，
+    # 只有标题的条目对"退货怎么操作"这类中文改写是召不回的（见 cs_agent.touches_surface）。
+    # 真实同步进来的条目都带 tags（见 demo_data / agent_spec.toml 的 tag_col）。
+    kb = [{"title": "退换货政策", "content": "签收 7 天内无理由退货，生鲜除外。",
+           "tags": ["退货", "换货", "退款", "售后", "生鲜"]}]
     r1 = web_run.offline_reply("退货怎么操作", kb)
     check("退换货" in r1, "离线检索命中退货政策")
     r2 = web_run.offline_reply("今天天气真好 unrelated xyz", kb)
     check("离线" in r2, "无匹配时诚实回落离线说明")
     r3 = web_run.chat("退货怎么操作", kb=kb, use_pasm=True)
     check("真实认知不可用" in r3 or "退换货" in r3, "--pasm 走真实或诚实降级，不崩")
+
+    # ★ 闸门的核心反例：只在**正文**里偶然重合、检索面完全不相干的提问，
+    #   必须回答"查不到"而不是答非所问（这正是它存在的理由）
+    kb2 = [{"title": "电子发票", "content": "发货次日发送电子发票至注册邮箱。",
+            "tags": ["发票", "开票", "税务"]}]
+    r_bad = web_run.offline_reply("请问 CEO 的私人邮箱是多少", kb2)
+    check("离线" in r_bad and "发票" not in r_bad,
+          "★ 正文偶然重合不许答非所问（CEO 邮箱 ≠ 电子发票）")
 
     # ★ 全新安装（还没跑过 run/demo，KB 文件不存在）也必须可用 ——
     # 否则 `pasm-cs web --selftest` 在干净环境里必然 AssertionError
@@ -121,13 +134,22 @@ def check_web() -> None:
         check(builtin is True and len(items) >= 4,
               "无业务资料时回落到内置演示知识（%d 条）" % len(items))
         r4 = web_run.offline_reply("退货怎么操作", items)
-        check("退换货" in r4, "内置知识也能被检索命中")
-    # 真跑一次 selftest（它会用 ensure_kb，干净环境不应失败）
-    try:
-        ok = web_run.selftest()
-        check(ok is True, "web selftest 在无 KB 时仍通过")
-    except AssertionError as ex:
-        check(False, "web selftest 失败：%s" % ex)
+        check("退换货" in r4, "内置知识也能被检索命中（内置数据带同义词标签）")
+        r5 = web_run.offline_reply("多久能发货", items)
+        check("配送" in r5, "改写式提问也能召回（标签里有「发货/多久」）")
+
+        # 真跑一次 selftest —— 但**把它指向空目录**，否则它读的是仓库里的
+        # 运行时 KB 文件（内容随上次同步而变），断言就变得不可复现。
+        old = web_run.DEFAULT_KB
+        try:
+            web_run.DEFAULT_KB = str(Path(td) / "nope.jsonl")
+            try:
+                ok = web_run.selftest()
+                check(ok is True, "web selftest 在无 KB 时仍通过（回落内置知识）")
+            except AssertionError as ex:
+                check(False, "web selftest 失败：%s" % ex)
+        finally:
+            web_run.DEFAULT_KB = old
 
 
 # ---------------------------------------------------------------- 5 MCP stdio
@@ -236,6 +258,55 @@ def check_mcp_selftest() -> None:
     check("通过" in (p.stdout or ""), "自检报告通过")
 
 
+# ------------------------------------------------- 4b 检索相关性闸门
+def check_relevance_gate() -> None:
+    """「答错内容」比「答不上来」严重 —— 这里守住"宁可说查不到"。
+
+    为什么单独成节：闸门是**纯函数**，不需要 pasm-framework 就能验；
+    而它的失效方式很隐蔽 —— 不会报错，只会开始**答非所问**。
+    """
+    section("检索相关性闸门（答错比答不上来更严重）")
+    from pasm_cs.cs_agent import (DEFAULT_SCORE_FLOOR, select_knowledge,
+                                  semantic_tokens, touches_surface)
+
+    # ① 分词口径：单字不作数（「你」「么」这类高频字会造成大量误命中）
+    check({"怎么", "么退", "退货"} <= semantic_tokens("怎么退货"),
+          "中文按 2-gram 切分")
+    check(semantic_tokens("a 我们") == {"我们"}, "单字 / 单字母不作数")
+
+    # ② 检索面 = 标题 + 标签；正文**不算**检索面
+    fact = {"title": "电子发票", "tags": ["发票", "开票"],
+            "content": "发货次日发送电子发票至注册邮箱。", "score": 2.29}
+    check(touches_surface(semantic_tokens("发票怎么开"), fact),
+          "命中落在标题/标签上 → 算数")
+    check(not touches_surface(semantic_tokens("CEO 的私人邮箱是多少"), fact),
+          "★ 只撞正文里的「邮箱」→ 不算命中（此前正是这里答非所问）")
+
+    # ③ 主判据：检索面命中即采纳
+    check(len(select_knowledge("发票怎么开", [fact])) == 1, "检索面命中 → 采纳")
+
+    # ④ 假命中且低于兜底门槛 → 拒绝（2.29 < 4.0）
+    check(select_knowledge("CEO 的私人邮箱是多少", [fact]) == [],
+          "★ 假命中（score 2.29 < %.1f）→ 拒绝" % DEFAULT_SCORE_FLOOR)
+
+    # ⑤ 分数兜底：检索面没撞上但分数够高仍采纳 —— 防"改写式提问被漏判"
+    strong = {"title": "配送时效", "tags": [],
+              "content": "现货 24h 发货。", "score": 6.0}
+    check(len(select_knowledge("多久能发货", [strong])) == 1,
+          "分数兜底可救回强命中（改写式提问不被漏判）")
+
+    # ⑥ 边界：空候选不抛异常
+    check(select_knowledge("", []) == [], "空候选返回空列表（不抛异常）")
+
+    # ⑦ 离线检索走同一套判据（两种模式行为必须一致）
+    from pasm_cs import web_run
+    kb = web_run.builtin_kb()
+    check("配送" in web_run.offline_reply("多久能发货", kb),
+          "★ 离线模式靠标签召回改写式提问")
+    check("离线模式" in web_run.offline_reply("请问 CEO 的私人邮箱是多少", kb),
+          "★ 离线模式同样不瞎答（答不上来就明说）")
+
+
 # ---------------------------------------------------------------- 6 平台导出
 def check_platforms() -> None:
     section("平台配置导出")
@@ -257,6 +328,7 @@ def main() -> int:
     check_connector()
     check_spec()
     check_web()
+    check_relevance_gate()
     check_mcp_selftest()
     if not fast:
         check_mcp_stdio()

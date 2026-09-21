@@ -11,7 +11,7 @@
 """
 from __future__ import annotations
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 from .connector import (  # noqa: F401
     DBKBSyncConnector,
@@ -25,10 +25,23 @@ from .connector import (  # noqa: F401
     KBItem,
     SyncReport,
 )
-from .cs_agent import build_cs_agent, cs_available, framework_available  # noqa: F401
+from .cs_agent import (  # noqa: F401
+    build_cs_agent,
+    cs_available,
+    framework_available,
+    # 检索相关性闸门（"查不到就如实说"的判据，可单独复用/测试）
+    semantic_tokens,
+    retrieval_surface,
+    touches_surface,
+    select_knowledge,
+    DEFAULT_SCORE_FLOOR,
+    NO_ANSWER_TEXT,
+)
 
 __all__ = [
     "DBKBSyncConnector", "DemoSource", "CsvSource", "SqlSource", "SqliteSource",
     "RestSource", "FileKBSink", "PasmKBSink", "KBItem", "SyncReport",
     "build_cs_agent", "cs_available", "framework_available",
+    "semantic_tokens", "retrieval_surface", "touches_surface",
+    "select_knowledge", "DEFAULT_SCORE_FLOOR", "NO_ANSWER_TEXT",
 ]

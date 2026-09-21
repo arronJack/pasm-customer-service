@@ -33,6 +33,7 @@ from pathlib import Path
 
 from . import demo_data, source_factory, web_run
 from .connector import DBKBSyncConnector, FileKBSink, PasmKBSink  # noqa: F401
+from .paths import DEFAULT_KB_PATH
 from .adapters.base import load_spec
 from .studio_loader import write_scenario
 
@@ -42,16 +43,20 @@ def _ensure_demo_sqlite(db_path: str, *, rebuild: bool = False) -> str:
     return demo_data.ensure_demo_sqlite(db_path, rebuild=rebuild)
 
 
-def _demo_sqlite() -> int:
-    """SQLite 增量同步演示（零依赖）：首轮全量 → 插入新行 → 次轮只抓增量 → 三轮幂等。"""
+def _demo_sqlite(spec=None) -> int:
+    """SQLite 增量同步演示（零依赖）：首轮全量 → 插入新行 → 次轮只抓增量 → 三轮幂等。
+
+    数据源同样从 spec 取（``make_source_for``）—— 手搓那版拿不到
+    ``tag_col = "tags"``，演示库明明有同义词标签，同步出来的 KB 却是空的。
+    """
     print("\n== SQLite 增量同步演示（agent_spec 的 knowledge.sync，零依赖）==")
     db = "examples/cs_demo.db"
     # 每次演示重建一个干净库，保证可重复
     db = _ensure_demo_sqlite(db, rebuild=True)
 
-    src = source_factory.make_source(
-        _ks("sqlite", db, source_name="faq"))
-    sink = FileKBSink("examples/sqlite_kb.jsonl")
+    spec = spec or load_spec()
+    src, _kind = source_factory.make_source_for(spec, "sqlite")
+    sink = FileKBSink(DEFAULT_KB_PATH)
     conn = DBKBSyncConnector(src, sink, state_path="examples/sqlite_state.json")
 
     print("  [首轮·全量] ", end="")
@@ -76,19 +81,26 @@ def _demo_sqlite() -> int:
     return 0
 
 
-def _ks(type_name: str, path=None, **extra):
-    """快速构造一条 KnowledgeSource（供演示与 run 使用）。"""
-    from .adapters.base import KnowledgeSource
-    return KnowledgeSource(type=type_name, path=path, extra=dict(extra))
+def spec_path_of(spec, source_type: str):
+    """取 spec 里某个类型知识源的 ``path``（没有则 None）。"""
+    for s in (getattr(spec, "knowledge_sources", None) or []):
+        if (s.type or "").lower() == source_type.lower():
+            return s.path
+    return None
 
 
 def _demo() -> int:
     # 清理历史 demo 专用 state 与产物，保证每次演示都是干净首跑
+    # （含 `run` 按源分名的 connector_state__*.json —— 漏了它，演示里的
+    #  "首轮全量" 会因为残留游标而变成 new=0，看起来像功能坏了）
     for st in ("examples/demo_state.json", "examples/csv_state.json",
                "examples/sqlite_state.json", "examples/cs_demo.db",
                "examples/demo_kb.jsonl", "examples/csv_kb.jsonl",
                "examples/sqlite_kb.jsonl", "examples/sqlite_run.jsonl",
-               "examples/run_kb.jsonl"):
+               "examples/run_kb.jsonl", DEFAULT_KB_PATH,
+               "examples/connector_state__csv.json",
+               "examples/connector_state__sqlite.json",
+               "examples/connector_state__demo.json"):
         try:
             Path(st).unlink()
         except FileNotFoundError:
@@ -96,8 +108,12 @@ def _demo() -> int:
     out = Path("examples/demo_kb.jsonl")
     print("== Demo：内置业务数据 → 资料库（FileKBSink）==")
     sink = FileKBSink(str(out))
-    conn = DBKBSyncConnector(source_factory.make_source(_ks("demo")), sink,
-                             state_path="examples/demo_state.json")
+    spec = load_spec()
+    # ★ 数据源一律从 agent_spec.toml 取，不手搓 KnowledgeSource。
+    #   手搓过的那版漏了 spec 里的 `tag_col`，于是演示产物 tags 恒为空——
+    #   演示路径与真实路径不一致，恰好把检索闸门最需要的同义词标签丢了。
+    src, _kind = source_factory.make_source_for(spec, "demo")
+    conn = DBKBSyncConnector(src, sink, state_path="examples/demo_state.json")
     r1 = conn.sync()
     print("  第一次同步：%s" % r1)
     r2 = conn.sync()
@@ -105,16 +121,23 @@ def _demo() -> int:
     print("  说明：两次内容相同，第二次 skipped=%d、new=%d，证明按指纹去重生效。"
           % (r2.skipped, r2.new))
 
-    print("\n== CSV 数据源演示（examples/products.csv）→ 资料库 ==")
+    csv_path = Path(spec_path_of(spec, "csv") or "examples/products.csv")
+    print("\n== CSV 数据源演示（%s）→ 资料库 ==" % csv_path.as_posix())
     sink2 = FileKBSink("examples/csv_kb.jsonl")
-    conn2 = DBKBSyncConnector(
-        source_factory.make_source(_ks("csv", "examples/products.csv",
-                                       source_name="products")),
-        sink2, state_path="examples/csv_state.json",
-    )
+    csv_src, _k2 = source_factory.make_source_for(spec, "csv")
+    conn2 = DBKBSyncConnector(csv_src, sink2,
+                              state_path="examples/csv_state.json")
     print("  同步：%s" % conn2.sync())
-    _demo_sqlite()
+    _demo_sqlite(spec)
     return 0
+
+
+def spec_path_of(spec, source_type: str):
+    """取 spec 里某个类型知识源的 ``path``（没有则 None）。"""
+    for s in (getattr(spec, "knowledge_sources", None) or []):
+        if (s.type or "").lower() == source_type.lower():
+            return s.path
+    return None
 
 
 def _validate() -> int:
@@ -156,7 +179,7 @@ def _run(args: argparse.Namespace) -> int:
                             persist_dir="./%s_state" % spec.agent_id)
         sink: object = PasmKBSink(cs)
     else:
-        out = args.out or "examples/run_kb.jsonl"
+        out = args.out or DEFAULT_KB_PATH
         sink = FileKBSink(out)
 
     conn = DBKBSyncConnector(src, sink,
@@ -215,10 +238,11 @@ def _platform(args: argparse.Namespace) -> int:
 def _studio() -> int:
     spec = load_spec()
     path = write_scenario(spec)
+    from .studio_loader import studio_scenarios_dir
     print("已生成 Studio 场景配置：%s" % path)
-    print("说明：当前 Studio（desktop/pasm_companion.py）NAV 固定 9 项，无外部导入入口；")
-    print("该配置已对齐 Studio 的 persona / KB 源字段，未来加「导入场景」UI 即可一键加载。")
-    print("普通人使用更推荐走 Web 壳：python -m pasm_cs.web_run")
+    print("在 PASM Studio 里一键加载：打开「⚙ 设置」→「📦 场景」页 → 选中本场景 → 点「导入」。")
+    print("（Studio 侧读取的目录与上面同一个：%s）" % studio_scenarios_dir())
+    print("普通人不想装 Studio？也可直接走 Web 壳：python -m pasm_cs.cli web")
     return 0
 
 

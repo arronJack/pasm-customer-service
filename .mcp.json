@@ -1,0 +1,16 @@
+{
+  "_comment": "MCP 客户端配置参考。Python 包用 uvx 拉起（无需预装）；也可改用已安装的 pasm-cs-mcp 可执行文件。把下面这段合并进你的客户端配置即可。",
+  "mcpServers": {
+    "pasm-customer-service": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "pasm-customer-service",
+        "pasm-cs-mcp"
+      ],
+      "env": {
+        "PASM_CS_PERSIST_DIR": ""
+      }
+    }
+  }
+}

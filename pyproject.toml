@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "pasm-customer-service"
-version = "0.1.0"
+version = "0.2.0"
 description = "基于 PASM 的专业客服系统：DB→KB 自生长资料库 + 记忆 + 情绪 + 多平台分发（MCP / Studio / Web / Coze）"
 readme = "README.md"
 requires-python = ">=3.9"

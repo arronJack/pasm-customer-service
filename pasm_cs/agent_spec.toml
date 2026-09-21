@@ -31,7 +31,7 @@ path = "examples/products.csv"
 id_col = "id"
 title_col = "title"
 content_col = "description"
-tag_col = "category"
+tag_col = "tags"             # ★ 同义词写在这里 —— 检索闸门要求命中落在标题/标签上
 category_col = "category"
 source_name = "products"
 
@@ -48,6 +48,7 @@ table = "faq"
 id_col = "id"
 title_col = "title"
 content_col = "description"   # 演示表用 description 作正文列
+tag_col = "tags"              # ★ 业务表的标签列（同义词）→ 检索面
 category_col = "category"
 updated_at_col = "updated_at"  # 增量游标列（ISO 时间戳，可直接比较）
 source_name = "faq"

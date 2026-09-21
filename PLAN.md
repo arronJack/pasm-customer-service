@@ -90,9 +90,12 @@ pasm-customer-service/
 - [x] **MCP 真·接线（已落地并端到端验证）**：`pasm_cs/adapters/mcp.py` 实现**零依赖 stdio MCP 服务**（协议与 `pasm-mcp-server` 同款），暴露 `cs_ask` / `cs_search_kb` / `cs_ingest` / `cs_sync` / `cs_persona` / `cs_status`。子进程按真实客户端协议驱动全部通过。
   - 设计取向：**不扩展 `pasm-mcp-server` 的 `CognitiveBridge`**（那会引入跨仓耦合 + 让通用包依赖未发的原型），而是**在原型内自足实现**，复用连接器与 `CustomerServiceAgent`；`pasm-mcp-server` 仍是通用认知服务（`pasm_*` 工具），二者可同时挂载。
 - [x] **客服智能体自足化**：新增 `pasm_cs/cs_agent.py`，修掉「直连 `pasm_framework.apps` 必崩」的隐患（`apps/` 未打包）；`pip install pasm-framework` 即可跑，无引擎自动降级 `light`。
+- [x] **打包/发布（2026-09-21 完成）**：已补 `pyproject.toml`（入口 `pasm-cs` / `pasm-cs-mcp`）、`git init` 并推双端公开仓，PyPI 已发 `0.2.0`。
+- [x] **分发渠道调研与元数据（2026-09-21 完成）**：产出 `docs/DISTRIBUTION.md`（三档渠道 + 上架步骤），并备好 `server.json`（官方 MCP Registry）/ `smithery.yaml` / `.mcp.json` / `glama.json` 与 README 的 `mcp-name:` 所有权标记。
+- [x] **技能包渠道**：客服智能体已作为 `pasm-cs-agent` 技能包发到 ClawHub + 本机 WorkBuddy（随 `pasm-agents` 0.5.0 一同发布）。
 - [ ] **Web 部署**：容器化 + 公网域名，提供 `public_token` 访客挂件（已有双令牌机制）。
-- [ ] **Coze/Character 转译**：`adapters/coze.py` 已出骨架，补「导出知识文件包」并写导入指引。
-- [ ] **打包/发布**：本原型目前**未打 `pyproject.toml`、未入 git**；要 `pip install`/发布须先补包定义（见「6. 发布与依赖现状」）。
+- [ ] **Coze/Character 转译导入指引**：`adapters/coze.py` 已出骨架，补「导出知识文件包」的逐步导入文档。
+- [ ] **社区目录提交**：Smithery / mcp.so / Glama / PulseMCP / 官方 MCP Registry 的网页提交（元数据已备齐，见 `docs/DISTRIBUTION.md` B 档）。
 - 验收（MCP 部分已达成）：MCP 客户端配置 `pasm-cs` 后，用平台 LLM 经 `cs_*` 直接对话、PASM 提供资料库/记忆/人格，数据留本地。
 
 ### 阶段四 · 企业级（多用户场景）
@@ -154,39 +157,39 @@ app = SimpleApplication("shop-cs", {"name": "小智", "role": "客服"},
 
 ---
 
-## 6. 发布与依赖现状（回答「PyPI / 已发布智能体 / 各平台是否要重发」）
+## 6. 发布与依赖现状（2026-09-21 实况，已执行完毕）
 
-### 6.1 三个 PyPI 包与 mcp-server：**本地 = PyPI，无需更新**
-| 包 | 本地版本 | PyPI 版本 | 本地工作树 | 结论 |
-|---|---|---|---|---|
-| pasm-skills | 0.5.2 | 0.5.2（2026-09-20） | clean | **无需更新** |
-| pasm-framework | 0.4.0 | 0.4.0（2026-09-20） | clean | **无需更新** |
-| pasm-agents | 0.4.11 | 0.4.11（2026-09-20） | clean | **无需更新** |
-| pasm-mcp-server | 0.2.0 | 0.2.0（2026-09-15） | clean | **无需更新** |
+> 本节记录「要不要重发」这个决策的**最终结果**。原文是决策前的调研，现按实际执行情况更新。
 
-本次改动的对象是**尚未发布的原型 `pasm-customer-service`**，四个已发布包**一行未改**。
-因此：**PyPI 不需要更新**。
+### 6.1 五个 PyPI 包：本地 = 线上
+| 包 | 版本 | PyPI | 本次是否重发 |
+|---|---|---|---|
+| pasm-skills | 0.5.2 | 0.5.2 | ❌ 一行未改 |
+| pasm-framework | 0.4.0 | 0.4.0 | ❌ 一行未改 |
+| pasm-agents | **0.5.0** | 0.5.0 | ✅ 重发（新增第 4 个产品） |
+| pasm-mcp-server | 0.2.0 | 0.2.0 | ❌ 一行未改 |
+| **pasm-customer-service** | **0.2.0** | 0.2.0 | ✅ 首发 0.1.0 → 重修后发 0.2.0 |
 
-### 6.2 唯一发现的真问题：`pasm-framework` 的 `apps/` 未打包
-- `pasm-framework/pyproject.toml`：`packages = ["pasm_framework", "pasm_framework.plugins", "pasm_framework.plugins.builtins"]`，**不含 `apps`**。
-- 后果：`from pasm_framework.apps.customer_service import CustomerServiceAgent` 在源码与 `pip install` 下**都会失败**（原型原 `web_run.py`/`cli.py` 因此存在隐患，之前只跑过离线路径未暴露）。
-- **已在原型侧修掉**（`pasm_cs/cs_agent.py`：优先框架参考实现，否则本地等价实现，只需已发布的 `BaseApplication`）。
-- **若想让下游都能 `from pasm_framework.apps...` 导入**，需改框架：把 `apps` 加进 `packages`（或在 `pasm-agents` 里把客服固化为一个**产品智能体**）。这属于**框架/成品层变更 → 需要发新版本**（如 `pasm-framework 0.4.1` 或 `pasm-agents 0.5.0`）。**是否做由你定**；不做也不影响本原型运行。
+### 6.2 已解决：`pasm-framework` 的 `apps/` 未打包
+- 原问题：`packages` 不含 `apps`，导致 `from pasm_framework.apps.customer_service import …`
+  在源码与 `pip install` 下**都会失败**。
+- **最终解法（双保险）**：① 原型侧 `pasm_cs/cs_agent.py` 统一入口（优先框架参考实现，否则本地等价实现）；
+  ② 客服**同时固化为 `pasm-agents` 的第 4 个产品** `CustomerServiceAgent`，走已打包的 `BaseApplication`。
+- 两条路都已端到端验证：`pip install pasm-agents` 后 `demo customer-service` / `selftest customer-service` 均可用。
 
-### 6.3 已发布的智能体（NpcAgent / ElderlyCompanion / LearningTutor + 验证智能体）
-- 它们**未被改动**，PyPI 上的 `pasm-agents 0.4.11` 即最新 → **无需重新生成、无需重发**。
-- 客服系统是**新增**能力，不属于已发布的三个产品智能体；要不要把它固化成第 4 个产品智能体（进 `pasm-agents`）另行决定。
+### 6.3 已发布智能体的处置
+- 原有 3 个产品 + 8 个验证智能体**接口未变**，随 `pasm-agents 0.5.0` 一起发出（版本号提升，兼容）。
+- 客服成为**第 4 个产品**，与另三个并列；但它是**唯一 `BaseApplication` 血统**（需要知识库插件）。
 
-### 6.4 各平台是否需要「重新发布」
-| 平台 | 是否需要重发 | 说明 |
+### 6.4 各平台分发结果
+| 平台 | 状态 | 说明 |
 |---|---|---|
-| **PyPI** | ❌ 不需要 | 本地=线上、四包 clean；除非决定改框架 `apps` 打包（则发 `pasm-framework 0.4.1`） |
-| **WorkBuddy 开放平台** | ❌ 现有技能/智能体无需重发 | 若要把**客服系统**作为新技能上架，才需要新发一次（且需先补 `pyproject.toml`） |
-| **ClawHub** | ❌ 现有物无需重发 | 同上；MCP 形态一般走「客户端配置」而非上架 |
-| **Character.ai** | ❌ 非必需 | 非 MCP，只能转译 persona 卡片；想做才做 |
-| **Coze** | ❌ 非必需 | 非 MCP，只能转译机器人配置；想做才做 |
+| **PyPI** | ✅ 已发 | `pasm-agents 0.5.0` + `pasm-customer-service 0.2.0`，公网安装已验证 |
+| **ClawHub** | ✅ 已发 | 5 个技能包（含新增 `pasm-cs-agent`），`arronjack/pasm-*` |
+| **本机 WorkBuddy** | ✅ 已装 | `~/.workbuddy/skills/pasm-*` v0.5.0，逐字节 sha256 一致 |
+| **skills.sh** | 🔜 已具备条件 | 仓库内 `skills/<name>/SKILL.md` 已生成，`npx skills add <repo> --list` 实测可列出 5 个 |
+| **Smithery / mcp.so / Glama / PulseMCP / 官方 MCP Registry** | 🔜 元数据已备 | `server.json` / `smithery.yaml` / `.mcp.json` / `glama.json` 已就位，待网页提交；官方 Registry 的 `login` 走 GitHub device flow，本机网络不可达 |
+| **Gitee / GitHub Release** | ✅ 双端已发 | `v0.5.0` tag + Release（中文 changelog） |
+| **Character.ai / Coze** | ⏭ 非必需 | 非 MCP，只能转译；**记忆/情绪不互通**，做之前需接受该代价 |
 
-**一句话**：本次只动了未发布的新原型 ⇒ **PyPI 与已发布智能体都不用动**；
-**ClawHub / WorkBuddy / Character / Coze 也不必重发**。
-真正要做的决策只有一个：**要不要把客服系统的 MCP 能力正式化**（补 `pyproject.toml` + 入 git，
-可选：进 `pasm-agents` 或发 PyPI / 上架 WorkBuddy&ClawHub）。
+详见 `docs/DISTRIBUTION.md`（三档渠道 + 逐步上架操作）与 `docs/ECOSYSTEM.md`（全生态矩阵）。

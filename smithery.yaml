@@ -1,0 +1,23 @@
+# Smithery 目录提交元数据
+#
+# ⚠️ Smithery 的 smithery.yaml 有多种历史形态（早期是 startCommand 块，后来以元数据为主）。
+#    本文件按「元数据 + 客户端拉起方式」写，字段名请在上架前用 smithery.ai 的
+#    校验器核对一次（命令：npx @smithery/cli --help）。
+#    真正被扫描器用来拉起服务的是同目录的 .mcp.json。
+
+name: pasm-customer-service
+description: >-
+  基于自有资料的客服智能体：就资料作答且绝不编造，答不上来如实说明，
+  客诉自动转人工。资料库可由数据库增量同步自生长（内容指纹去重、幂等）。
+categories:
+  - productivity
+  - customer-support
+license: MIT
+repository: https://github.com/arronJack/pasm-customer-service
+homepage: https://gitee.com/arronzheng/pasm-customer-service
+keywords:
+  - mcp
+  - customer-service
+  - knowledge-base
+  - rag
+  - db-sync

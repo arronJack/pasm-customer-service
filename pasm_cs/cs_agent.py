@@ -20,6 +20,7 @@
 from __future__ import annotations
 
 import importlib.util
+import re
 from typing import Any, Dict, List, Optional
 
 
@@ -37,6 +38,113 @@ def _canonical_class():
         except Exception:
             continue
     return None
+
+
+# ============================================================ 检索相关性闸门
+#: 与框架 ``knowledge_base`` 同口径的分词：英文/数字词（≥2 字符）+ 中文 bigram。
+#: **单字不作数** —— 「你」「么」这类高频字会造成大量误命中。
+_WORD_RE = re.compile(r"[A-Za-z0-9_]+|[\u4e00-\u9fff]+")
+
+#: 次级判据的分数门槛（见 ``select_knowledge``）。
+DEFAULT_SCORE_FLOOR: float = 4.0
+
+NO_ANSWER_TEXT = ("抱歉，我暂时没有查到关于这个问题的资料，已记录您的问题。"
+                  "您可以拨打我们的客服热线，或稍后再试，我们会尽快完善答案。")
+
+
+def semantic_tokens(text: str) -> set:
+    """把文本切成检索用的 token（与框架同口径）。"""
+    out: set = set()
+    for seg in _WORD_RE.findall(text or ""):
+        if seg[0].isascii():
+            if len(seg) >= 2:
+                out.add(seg.lower())
+        elif len(seg) >= 2:
+            for i in range(len(seg) - 1):
+                out.add(seg[i:i + 2])
+    return out
+
+
+def retrieval_surface(fact: Dict[str, Any]) -> str:
+    """条目的**检索面**：标题 + 标签（+ 分类，若上游带过来）。
+
+    为什么是这三个：标题和标签是人工维护的"这条讲什么"的声明；
+    ``category`` 来自业务数据（如 SQLite 的 category 列），同样是人工分类。
+    正文（``content``）**不算检索面** —— 见 ``touches_surface``。
+    """
+    parts = [str(fact.get("title") or ""), str(fact.get("category") or "")]
+    parts += [str(t) for t in (fact.get("tags") or [])]
+    return " ".join(parts)
+
+
+def touches_surface(query_tokens: set, fact: Dict[str, Any]) -> bool:
+    """这条命中是否落在条目的检索面上（标题 / 标签 / 分类）。
+
+    为什么要这道闸门（实测数据，不是拍脑袋）
+    ------------------------------------------
+    ``knowledge_base`` 的分数是 ``(重叠词×字段权重 + 精确率) × 时间衰减``。
+    在 4 条起步资料库上实测：
+
+    * 真问题（「怎么退货？」「发票怎么开？」「会员权益有哪些」…）分数 **6.00 ~ 24.00**；
+    * 假命中：问「请问 CEO 的私人邮箱是多少」，靠正文里一个「邮箱」命中了
+      **电子发票** —— 分数 **2.29**，回复于是**答非所问**。
+
+    想用绝对分数分开它们有个陷阱：假命中 2.29 与真命中里较弱的
+    「发货要几天」2.40 只差 0.11 —— **任何阈值都分不开**。
+    而分数还带**时间衰减**（``0.6 + 0.4 × recency``），资料库放一个月后
+    真命中会被压到 0.6 倍，固定阈值必然开始"失忆"。
+
+    所以主判据用**与分数、与时间都无关**的规则：**命中必须落在检索面上**。
+    只跟正文里一个偶然重合的词撞上，几乎都是假命中。
+    """
+    return bool(query_tokens & semantic_tokens(retrieval_surface(fact)))
+
+
+def select_knowledge(text: str, knowledge: List[Dict[str, Any]],
+                     score_floor: float = DEFAULT_SCORE_FLOOR
+                     ) -> List[Dict[str, Any]]:
+    """从候选知识里挑出**真正相关**的那些；挑不出返回 ``[]``。
+
+    两级判据，顺序不能反：
+
+    1. **检索面命中**（主判据，与分数/时间无关）—— 只要能落在标题/标签上就采纳；
+    2. **分数兜底**（次级）—— 检索面没撞上、但分数足够高（默认 ≥ 4.0）也采纳。
+
+    第 2 级是必要的：像「多久能发货」这种改写，若资料的标签里没有「发货」，
+    纯检索面规则会漏判。兜底门槛取 4.0 而不是 2.0，是因为实测假命中能到 2.29
+    （见 ``touches_surface``）。
+
+    ⚠️ **给资料维护者的契约**：想让改写式提问（"多久能发货"→"配送时效"）命中，
+    正解是**把同义词写进 tags**，而不是调低阈值 —— 阈值一松就会放回假命中。
+    """
+    if not knowledge:
+        return []
+    qt = semantic_tokens(text)
+    hit = [f for f in knowledge if touches_surface(qt, f)]
+    if hit:
+        return hit
+    return [f for f in knowledge
+            if float(f.get("score") or 0.0) >= score_floor]
+
+
+def _wrap_gate(cls):
+    """给任意客服实现套上相关性闸门（无论走参考实现还是本地实现，行为一致）。
+
+    为什么用子类包装而不是改各自的方法：``build_cs_agent`` 有两条来源
+    （框架参考实现 / 本地等价实现），行为必须一致；包装一次，两边都受管。
+    """
+    inner = cls._render_reply
+
+    def _render_reply(self, text, facts, mood):
+        # ① 先按"有来源"过滤（排除对话记忆被当成知识），
+        # ② 再过相关性闸门，③ 剩下什么就交给底层渲染。
+        knowledge = self.knowledge_facts(facts)
+        picked = select_knowledge(text, knowledge)
+        if not picked:
+            return NO_ANSWER_TEXT
+        return inner(self, text, picked, mood)
+
+    return type(cls.__name__, (cls,), {"_render_reply": _render_reply})
 
 
 # ---- 本地等价实现（与框架参考实现同源，仅依赖已发布的 BaseApplication） ----
@@ -100,18 +208,21 @@ def _make_local_class():
 
         def _render_reply(self, text: str, facts: List[Dict[str, Any]],
                           mood: float) -> str:
-            """只依据“有来源的知识”作答；查不到如实说不知道（不编造）。"""
-            knowledge = [f for f in facts if f.get("source")]
-            if knowledge:
-                top = knowledge[0]
-                brief = (top.get("brief") or top.get("title") or "").strip()
-                src = str(top.get("source", ""))
-                answer = "关于您的问题，我们查到相关说明：%s" % brief
-                if src.startswith("knowledge_base"):
-                    answer += "（资料来源：%s）" % src.split(":", 1)[-1]
-                return answer
-            return ("抱歉，我暂时没有查到关于这个问题的资料，已记录您的问题。"
-                    "您可以拨打我们的客服热线，或稍后再试，我们会尽快完善答案。")
+            """渲染回复。
+
+            ``facts`` 到这里时已经过 ``_wrap_gate`` 的两道过滤
+            （只留"有来源的知识" + 过相关性闸门），所以这里只管措辞。
+            """
+            knowledge = self.knowledge_facts(facts)
+            if not knowledge:
+                return NO_ANSWER_TEXT
+            top = knowledge[0]
+            brief = (top.get("brief") or top.get("title") or "").strip()
+            src = str(top.get("source", ""))
+            answer = "关于您的问题，我们查到相关说明：%s" % brief
+            if src.startswith("knowledge_base"):
+                answer += "（资料来源：%s）" % src.split(":", 1)[-1]
+            return answer
 
         def ingest_faq(self, items: List[Dict[str, Any]]) -> int:
             return self.ingest(items)
@@ -143,6 +254,9 @@ def build_cs_agent(agent_id: str, persona: Optional[Dict[str, Any]] = None, *,
     调用 ``.serve()`` 之前**必须**为真，否则 ``BaseApplication.serve()`` 抛
     ``FrameworkError``。注意框架参考实现无条件启用网关，该开关对它无效（也不冲突）。
 
+    **无论走哪条来源，返回的实例都带检索相关性闸门**（见 ``select_knowledge``）：
+    查不到就如实说查不到，不会拿一条只沾一个词的资料答非所问。
+
     ``pasm-framework`` 缺席时抛 ``RuntimeError``（由调用方决定降级策略）。
     """
     cls = _canonical_class()
@@ -151,9 +265,10 @@ def build_cs_agent(agent_id: str, persona: Optional[Dict[str, Any]] = None, *,
             raise RuntimeError(
                 "需要 pasm-framework：pip install pasm-framework")
         cls = _make_local_class()
-        return cls(agent_id, persona=persona, kb_dir=kb_dir, llm=llm,
-                   serve_port=serve_port, enable_gateway=enable_gateway,
-                   persist_dir=persist_dir)
+        return _wrap_gate(cls)(agent_id, persona=persona, kb_dir=kb_dir, llm=llm,
+                               serve_port=serve_port,
+                               enable_gateway=enable_gateway,
+                               persist_dir=persist_dir)
     # 参考实现没有 enable_gateway 形参（它总是启用网关），保持一致签名调用
-    return cls(agent_id, persona=persona, kb_dir=kb_dir, llm=llm,
-               serve_port=serve_port, persist_dir=persist_dir)
+    return _wrap_gate(cls)(agent_id, persona=persona, kb_dir=kb_dir, llm=llm,
+                           serve_port=serve_port, persist_dir=persist_dir)

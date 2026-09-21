@@ -1,13 +1,34 @@
-# PASM 专业客服系统（原型）
+# PASM 专业客服系统
+
+<!-- mcp-name: io.github.arronjack/pasm-customer-service -->
+<!-- ↑ 上面这行是官方 MCP Registry 的 PyPI 包所有权校验标记，勿删；
+        必须与 server.json 的 name 字段逐字一致。详见 docs/DISTRIBUTION.md -->
 
 基于 PASM 的「有性格、有情绪、有记忆、会成长、能随业务数据自动生长资料库」的
 专业客服系统。**一份声明式规格（`agent_spec.toml`），多种运行形态**：
 
-- 本地命令运行（开发者）
-- PASM Studio 场景模板（普通人，图形界面）
-- MCP 适配器 → WorkBuddy / ClawHub / Claude Desktop（平台 LLM 直接调用你的 PASM）
-- Web 适配器 → 站点 `<iframe>` / REST（完全不懂技术的人也能用）
-- Coze / Character 适配器 → 转译导入
+| 形态 | 给谁用 | 入口 |
+|---|---|---|
+| 本地命令 | 开发者 | `pasm-cs demo / run / serve` |
+| **MCP 服务** | WorkBuddy / ClawHub / Claude Desktop / Cursor | `pasm-cs mcp`（stdio，6 个 `cs_*` 工具） |
+| **Web 壳** | 完全不懂技术的人（浏览器直接用） | `pasm-cs web` |
+| PASM Studio 场景 | 图形界面用户 | `pasm-cs studio` 生成配置 → Studio「📦 场景」页导入 |
+| Coze / Character | 平台内重建 | `pasm-cs platform coze` 导出人格+知识 |
+
+> **完整使用手册见 [`docs/USAGE.md`](docs/USAGE.md)**（四种形态逐步上手 + 真实效果截图）；
+> **全生态关联图与说明见 [`docs/ECOSYSTEM.md`](docs/ECOSYSTEM.md)**（八仓职责 / 依赖链 / 数据流 / 平台矩阵）；
+> **分发渠道与上架操作见 [`docs/DISTRIBUTION.md`](docs/DISTRIBUTION.md)**。
+
+### 真实效果
+
+| CLI（增量同步：全量 → 只抓新增 → 幂等） | Web 壳（浏览器直接对话） | Studio 场景页（一键导入） |
+|---|---|---|
+| ![CLI](docs/images/cli_demo.png) | ![Web](docs/images/web_chat.png) | ![Studio](docs/images/studio_scene.png) |
+
+> 三张图均为**真跑产物**（CLI 截真实终端输出、Web 壳起真 HTTP 服务用 QtWebEngine 渲染、
+> Studio 用真 `SettingsDialog` 离屏截图），非示意图。
+
+
 
 ## 快速开始
 
@@ -63,6 +84,10 @@ python -m pasm_cs.adapters.mcp --selftest  # 自检（含离线降级路径）
 
 `pasm_cs/connector.py` 把业务数据（CSV/SQL/REST/内置 Demo）转换成 PASM 资料库条目
 `{title, content, source, tags}`，**按内容指纹去重、可断点续传、幂等**。
+
+> ⚠ **`tags` 就是检索面**：框架的资料库插件**只接受 `tags`、会丢掉 `category`**，
+> 所以业务表的分类列必须**同时写进 `tag_col`**，否则资料同步进去了却检索不到。
+> 标签要写**同义词**（如退货条目写 `退货/换货/售后/退款/生鲜`），用户换个说法才问得出来。
 
 ```python
 from pasm_cs.connector import DBKBSyncConnector, CsvSource, PasmKBSink

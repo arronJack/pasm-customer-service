@@ -1,4 +1,5 @@
 # 运行时生成的演示产物（非源码）
+examples/kb.jsonl
 examples/*_kb.jsonl
 examples/*_state.json
 examples/*__*.json
