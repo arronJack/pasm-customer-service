@@ -1,0 +1,53 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pasm-customer-service"
+version = "0.1.0"
+description = "基于 PASM 的专业客服系统：DB→KB 自生长资料库 + 记忆 + 情绪 + 多平台分发（MCP / Studio / Web / Coze）"
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "MIT" }
+authors = [{ name = "arronzheng" }]
+keywords = ["pasm", "customer-service", "knowledge-base", "mcp", "agent", "db-sync"]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Intended Audience :: Developers",
+]
+
+# 核心运行时**零第三方依赖**：连接器 / MCP 服务 / Web 壳只用标准库，
+# 因此「装完即可跑」，不装任何东西也能 demo 与自检。
+dependencies = []
+
+[project.optional-dependencies]
+# 生产级 SQL 源（SqlSource 走 sqlalchemy；SqliteSource 是标准库，不需要它）
+sql = ["sqlalchemy>=1.4"]
+# 接真 PASM 认知（资料库/记忆/情绪/温度）；不装则自动降级为离线关键词检索
+pasm = ["pasm-framework>=0.4.0"]
+# Python 3.9/3.10 没有内置 tomllib，解析 agent_spec.toml 需要 tomli
+toml = ["tomli>=2.0; python_version < '3.11'"]
+dev = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://gitee.com/arronzheng/pasm-customer-service"
+Documentation = "https://gitee.com/arronzheng/pasm-agents"
+Repository = "https://gitee.com/arronzheng/pasm-customer-service"
+
+[project.scripts]
+# 命令行入口：pasm-cs demo / validate / run / serve / web / studio / platform / mcp
+pasm-cs = "pasm_cs.cli:main"
+# MCP 服务器入口（供 WorkBuddy / ClawHub / Claude Desktop 以 stdio 拉起）
+pasm-cs-mcp = "pasm_cs.adapters.mcp:main"
+
+[tool.setuptools]
+packages = ["pasm_cs", "pasm_cs.adapters"]
+
+[tool.setuptools.package-data]
+# agent_spec.toml 必须随包分发：load_spec() 从包内路径读取，
+# 否则 pip 安装后 validate / run / mcp 全部失效。
+pasm_cs = ["agent_spec.toml"]

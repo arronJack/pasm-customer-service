@@ -1,0 +1,28 @@
+# 运行时生成的演示产物（非源码）
+examples/*_kb.jsonl
+examples/*_state.json
+examples/*__*.json
+examples/connector_state*.json
+examples/*.db
+examples/run_kb.jsonl
+
+# 但示例配置与演示数据是源码，必须纳入版本库
+!examples/products.csv
+!examples/mcp_clients.json
+
+# Python
+*.pyc
+__pycache__/
+*.egg-info/
+.eggs/
+
+# 构建产物
+build/
+dist/
+.venv/
+venv/
+
+# 本地运行残留（智能体状态/KB 落盘）
+*_kb/
+*_state/
+.pasm-cs-mcp/

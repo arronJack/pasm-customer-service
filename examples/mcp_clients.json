@@ -1,0 +1,33 @@
+{
+  "_note": "把这段配置粘进 MCP 客户端（WorkBuddy / Claude Desktop / Cursor / ClawHub）的 MCP 设置即可远程调用本地/云端 PASM 客服实例。数据留在你的实例，不上传平台。",
+  "_prereq": "运行 `pip install pasm-framework` 后，把工作目录设为 pasm-customer-service 仓库根（或把该仓库加入 PYTHONPATH）。",
+
+  "claude_desktop": {
+    "mcpServers": {
+      "pasm-cs": {
+        "command": "python",
+        "args": ["-m", "pasm_cs.adapters.mcp"],
+        "env": { "PASM_CS_PERSIST_DIR": "~/.pasm-cs-mcp" }
+      }
+    }
+  },
+
+  "workbuddy_或_clawhub_通用": {
+    "mcpServers": {
+      "pasm-cs": {
+        "command": "python",
+        "args": ["-m", "pasm_cs.adapters.mcp"],
+        "env": {}
+      }
+    }
+  },
+
+  "_tools": [
+    "cs_ask        直接回答客户问题（KB + 温度 + 可选 LLM）",
+    "cs_search_kb  只检索资料库，返回命中条目（平台模型自行组织语言）",
+    "cs_ingest     新增/补充一条知识",
+    "cs_sync       跑一次 DB→KB 增量同步（复用连接器）",
+    "cs_persona    查看/微调客服人格",
+    "cs_status     后端可用性 / 资料库规模"
+  ]
+}

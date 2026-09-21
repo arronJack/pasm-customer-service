@@ -1,0 +1,77 @@
+# =====================================================================
+# 专业客服智能体 · 声明式规格（Agent Spec）
+# ---------------------------------------------------------------------
+# 这是「一份配置，多处运行」的核心：同一个 spec，可被
+#   · 本地 CLI（命令运行）
+#   · PASM Studio 场景模板（图形界面运行）
+#   · MCP 适配器（WorkBuddy / ClawHub / Claude Desktop 等平台运行）
+#   · Web 适配器（站点 <iframe> / REST 运行）
+#   · Coze 适配器（转译成 Coze 机器人配置后导入）
+# 消费。人格 / 知识源 / 能力 / 平台开关都集中在这里。
+# =====================================================================
+
+[agent]
+id = "shop-cs"
+# persona 直接对应 pasm_skills.sdk.BaseAgent 的 persona 字段
+[agent.persona]
+name = "小智"
+role = "智能客服"
+tone = "温暖、专业、耐心"
+temper = 0.6      # 主动性 0~1
+energy = 0.5      # 活跃度 0~1
+play = 0.4        # 俏皮度 0~1
+
+# 知识源：业务数据如何变成资料库（DB→KB 同步连接器）
+[agent.knowledge]
+# 首次启动一次性灌入；之后由连接器按指纹增量同步。
+
+[[agent.knowledge.sources]]
+type = "csv"
+path = "examples/products.csv"
+id_col = "id"
+title_col = "title"
+content_col = "description"
+tag_col = "category"
+category_col = "category"
+source_name = "products"
+
+[[agent.knowledge.sources]]
+type = "demo"      # 内置演示数据，确保「开箱即跑」
+
+# 演示「真实数据库增量同步」的 SQLite 源（零依赖，标准库 sqlite3）。
+# 文件不存在时会就地生成演示库（见 pasm_cs/demo_data.py），
+# 因此 pip 安装后（CWD 不再是仓库根）依然开箱可跑。
+[[agent.knowledge.sources]]
+type = "sqlite"
+path = "examples/cs_demo.db"
+table = "faq"
+id_col = "id"
+title_col = "title"
+content_col = "description"   # 演示表用 description 作正文列
+category_col = "category"
+updated_at_col = "updated_at"  # 增量游标列（ISO 时间戳，可直接比较）
+source_name = "faq"
+
+[agent.knowledge.sync]
+interval_seconds = 0          # >0 时后台周期同步；0 表示只注册、手动触发
+state_path = "examples/connector_state.json"
+
+# 能力：暴露给平台的工具（对应 pasm_framework 的 @capability）
+[[agent.capabilities]]
+name = "query_order"
+description = "查询客户订单状态与物流进度"
+
+[[agent.capabilities]]
+name = "open_ticket"
+description = "为客户登记售后工单"
+
+[[agent.capabilities]]
+name = "lookup_product"
+description = "根据关键词检索商品信息与库存"
+
+# 平台分发开关
+[agent.platforms]
+mcp = true        # 通过 pasm-mcp-server 暴露给 MCP 兼容客户端
+web = true        # 通过 web_gateway 提供站点嵌入与 REST
+web_port = 8080
+coze = false      # 转译为 Coze 机器人配置（需手动导入）

@@ -1,0 +1,69 @@
+# =====================================================================
+# PASM Studio · 客服场景模板清单（Studio 消费）
+# ---------------------------------------------------------------------
+# 这是给「PASM Studio 桌面端」用的场景模板描述。普通用户打开 Studio →
+# 选「专业客服」模板 → 导入自己的业务数据源（CSV/数据库）→ 一键启动，
+# 无需懂 Python、无需命令行。
+#
+# Studio 在加载本清单时应当：
+#   1. 用 persona 预置一个客服智能体（直接传给 CustomerServiceAgent）；
+#   2. 用 knowledge.sources 弹出「选择数据源」向导，生成连接器配置；
+#   3. 用 platforms.web 自动起一个本地网关，提供可嵌入的聊天挂件；
+#   4. 用 capabilities 在界面上展示「可调用的业务工具」。
+# =====================================================================
+
+template:
+  id: "professional-customer-service"
+  name: "专业客服系统"
+  icon: "headset"
+  description: >
+    带人格、有情绪、记得客户、能随业务数据库自动成长的客服智能体。
+    数据留在本地，适合电商/教育/政务等需要专业应答的场景。
+  min_studio_version: "0.31.0"
+
+persona:
+  name: "小智"
+  role: "智能客服"
+  tone: "温暖、专业、耐心"
+  temper: 0.6
+  energy: 0.5
+  play: 0.4
+
+knowledge_wizard:
+  # Studio 向导支持的源类型（与 pasm_cs.connector 一一对应）
+  sources:
+    - type: csv
+      label: "Excel / CSV 文件"
+      fields: [path, id_col, title_col, content_col, tag_col, category_col]
+    - type: sql
+      label: "业务数据库（MySQL/PostgreSQL）"
+      fields: [url, query]
+    - type: rest
+      label: "业务接口（REST API）"
+      fields: [url, headers]
+  sync_mode:
+    - {value: "once", label: "仅首次导入"}
+    - {value: "schedule", label: "定时同步（保持资料库与业务一致）"}
+
+platforms:
+  web:
+    enabled: true
+    port: 8080
+    embed_hint: "复制下方 <iframe> 到你的网站即可嵌入客服挂件"
+  mcp:
+    enabled: true
+    hint: "可被 WorkBuddy / ClawHub 等 MCP 客户端远程调用"
+
+capabilities:
+  - name: query_order
+    label: "查订单"
+  - name: open_ticket
+    label: "开售后工单"
+  - name: lookup_product
+    label: "查商品"
+
+# 对接到真实内核的入口（Studio 内部调用，普通用户不可见）
+runtime:
+  app_factory: "pasm_framework.apps.customer_service.CustomerServiceAgent"
+  connector_plugin: "pasm_cs.plugin.DBKBSyncPlugin"
+  spec: "pasm_cs/agent_spec.toml"
